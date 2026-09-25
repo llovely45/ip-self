@@ -2,12 +2,10 @@ package main
 
 import (
 	"bufio"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -114,36 +112,9 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 	}
 	var certFile, keyFile string
 	if !isLoopbackListener(listenAddr) {
-		fmt.Println("非回环监听必须使用 TLS。请提供可被 ip-self 读取的证书和私钥文件。")
-		certFile, err = prompt(reader, "TLS 证书文件路径")
+		certFile, keyFile, err = configureTLSWithReader(reader, configPath)
 		if err != nil {
 			return err
-		}
-		keyFile, err = prompt(reader, "TLS 私钥文件路径")
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(certFile) == "" || strings.TrimSpace(keyFile) == "" {
-			return errors.New("TLS certificate and key paths are required for a non-loopback listener")
-		}
-		certFile, err = filepath.Abs(certFile)
-		if err != nil {
-			return err
-		}
-		keyFile, err = filepath.Abs(keyFile)
-		if err != nil {
-			return err
-		}
-		if _, err := os.Stat(certFile); err != nil {
-			return fmt.Errorf("TLS certificate is not readable: %w", err)
-		}
-		if info, err := os.Stat(keyFile); err != nil {
-			return fmt.Errorf("TLS private key is not readable: %w", err)
-		} else if info.Mode().Perm()&0077 != 0 {
-			return errors.New("TLS private key permissions are too broad; restrict it to owner access (for example chmod 600)")
-		}
-		if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
-			return fmt.Errorf("invalid TLS certificate/key pair: %w", err)
 		}
 	}
 
