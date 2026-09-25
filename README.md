@@ -1,14 +1,14 @@
 # ip-self
 
-`ip-self` is a small Linux IP allowlist controller. Its HTTPS control API listens on TCP port **38853**. After a valid authenticated `POST /v1/allow`, it adds the direct peer IP to the firewall allowlist for the TCP ports selected in the interactive panel.
+`ip-self` 是一个用于管理 Linux IP 白名单的工具。HTTPS 控制 API 监听 TCP **38853** 端口。客户端向 `POST /v1/allow` 发送有效认证请求后，程序会把 TCP 直连来源 IP 加入交互式面板所配置的业务端口防火墙白名单。
 
-The control port must remain reachable so clients can authenticate. It is protected by TLS and a fixed UUIDv7 Bearer token. The selected business ports receive a default-deny rule, followed by source-IP allow rules. The control port cannot be selected as a business port.
+控制端口必须保持可连接，客户端才能完成认证。该端口通过 TLS 和固定的 UUIDv7 Bearer Token 保护。所选业务端口会设置为默认拒绝，再为白名单中的来源 IP 添加放行规则。控制端口不能作为业务端口。
 
-## Install and initialize
+## 安装与初始化
 
-### One-line installer
+### 一键安装
 
-On Linux x86_64 or ARM64, run:
+适用于 Linux x86_64 和 ARM64。复制并运行：
 
 ```sh
 installer="$(mktemp)" &&
@@ -19,46 +19,46 @@ rm -f "${installer:-}"
 exit "$result"
 ```
 
-The installer downloads the latest Linux binary and `SHA256SUMS` over HTTPS, verifies the checksum, and installs to `/usr/local/bin/ip-self`. It requires `curl`, `sha256sum` (or `shasum`), and root privileges. It does not configure the firewall; run `sudo ip-self` after installation to review and apply the setup interactively. The supported architectures are `x86_64` and `aarch64`.
+安装脚本通过 HTTPS 下载最新 Linux 二进制文件和 `SHA256SUMS`，校验通过后安装到 `/usr/local/bin/ip-self`。需要 `curl`、`sha256sum`（或 `shasum`）以及 root 权限。安装过程不会修改防火墙；安装后运行 `sudo ip-self`，通过交互面板检查并确认初始化配置。支持的架构为 `x86_64` 和 `aarch64`。
 
-You can also download an asset from [GitHub Releases](https://github.com/llovely45/ip-self/releases) and install it manually, or install from source with Go:
+也可以从 [GitHub Releases](https://github.com/llovely45/ip-self/releases) 手动下载并安装，或使用 Go 从源码安装：
 
 ```sh
 go install github.com/llovely45/ip-self@latest
 sudo install -m 0755 "$(go env GOPATH)/bin/ip-self" /usr/local/bin/ip-self
 ```
 
-Firewall changes and the default configuration path require root. Open the panel with:
+修改防火墙和使用默认配置路径需要 root 权限。运行以下命令打开面板：
 
 ```sh
 sudo ip-self
 ```
 
-Choose **Initialize**. The panel asks for:
+选择 **初始化**。面板会要求配置：
 
-1. The listener address on port `38853`.
-2. TLS certificate and private key paths when listening beyond loopback. The private key must be readable only by its owner (for example, mode `0600`).
-3. The business TCP ports to protect, such as `22,80,443`.
-4. Optional initial trusted source IPs.
-5. UFW, iptables, or nftables, then an explicit `APPLY` confirmation.
+1. 监听地址，端口固定为 `38853`。
+2. 如果监听地址不是回环地址，需要提供 TLS 证书和私钥路径。私钥应仅允许文件所有者读取，例如权限设为 `0600`。
+3. 要保护的业务 TCP 端口，例如 `22,80,443`。
+4. 可选的初始可信来源 IP。
+5. 选择 UFW、iptables 或 nftables，并输入 `APPLY` 明确确认应用规则。
 
-Selected business ports default to deny for every IP outside the allowlist. If the list includes SSH (`22`), add your current management IP during setup or be ready to call the API from that IP before opening a new SSH connection. An empty initial list denies new connections to all selected business ports until the first successful API call.
+所选业务端口默认拒绝白名单以外来源的连接。如果业务端口包含 SSH（`22`），请在初始化时加入当前管理 IP；否则，在建立新的 SSH 连接前，需要先从该 IP 成功调用 API。若初始白名单为空，所选业务端口的新连接会被拒绝，直到第一次 API 调用成功。
 
-Initialization creates one cryptographically random UUIDv7 token and stores it in `/etc/ip-self/config.json` with mode `0600` in a protected directory. The token is fixed after creation; the panel will not overwrite it. Save the displayed token securely. Use **Show Token** in the panel or `sudo ip-self token` to read it later.
+初始化时，程序会生成一个使用密码学安全随机数创建的 UUIDv7 Token，并以 `0600` 权限保存在受保护目录中的 `/etc/ip-self/config.json`。Token 创建后固定不变，面板不会覆盖它。请安全保存面板显示的 Token；之后可在面板选择 **显示 Token**，或运行 `sudo ip-self token` 查看。
 
-UFW must already be active; `ip-self` will not enable UFW because doing so can change host-wide firewall state or interrupt SSH. When UFW is selected, ip-self places its tagged rules before existing rules for the selected ports. For iptables and nftables, UFW must not be active. The iptables backend manages both IPv4 and IPv6 INPUT chains. The nftables backend owns the `inet ipself` table; it refuses to replace that table if it finds rules without ip-self ownership comments.
+选择 UFW 时，UFW 必须已经处于启用状态。`ip-self` 不会替你启用 UFW，因为这可能改变主机全局防火墙状态或中断 SSH。程序会把带有自身标记的规则放在所选端口已有规则之前。使用 iptables 或 nftables 时，UFW 必须未启用。iptables 后端管理 IPv4 和 IPv6 的 INPUT 链。nftables 后端使用自有的 `inet ipself` 表；如果发现其中存在没有 `ip-self` 所有权注释的规则，程序会拒绝替换该表。
 
-Start the API from the panel or run:
+可以从面板启动 API，也可以运行：
 
 ```sh
 sudo ip-self serve
 ```
 
-The `serve` command reapplies the saved firewall policy before opening the listener. Keep it running so requests can be handled. Configure your service manager to start `ip-self serve` after boot if you want iptables/nftables rules restored automatically after a reboot.
+`serve` 会先重新应用已保存的防火墙策略，再启动监听。请保持该进程运行以接收请求。如果希望重启后自动恢复 iptables/nftables 规则，请配置系统服务管理器在开机后启动 `ip-self serve`。
 
-## API
+## API 调用
 
-The API derives the address from the TCP connection's direct peer. It ignores proxy headers and accepts no client-supplied IP or request body.
+API 使用 TCP 连接的直连对端地址作为来源 IP。程序会忽略代理请求头，不接受请求体或客户端提供的目标 IP。
 
 ```sh
 printf 'Token: '
@@ -70,19 +70,19 @@ curl --fail-with-body -X POST \
 unset IP_SELF_TOKEN
 ```
 
-Success returns the peer IP and configured ports as JSON. The same IP can call the endpoint again safely. The resulting firewall rules persist in the config and are restored when `ip-self serve` starts.
+成功时会以 JSON 返回来源 IP 和已配置的端口。相同 IP 可以安全地重复调用。生成的防火墙规则会保存在配置中，并在 `ip-self serve` 启动时恢复。
 
-Do not put the token in a URL, shell history, source control, or logs. Direct TLS is required for non-loopback listeners. If a reverse proxy is used, the firewall sees the proxy's address; trusting `X-Forwarded-For` is intentionally unsupported.
+不要把 Token 放进 URL、Shell 历史记录、源代码仓库或日志中。监听非回环地址时必须使用 TLS。如果使用反向代理，防火墙看到的来源 IP 将是代理地址；程序有意不支持信任 `X-Forwarded-For`。
 
-## Security behavior
+## 安全措施
 
-- Bearer authentication uses constant-time comparison; failed and successful requests are rate-limited.
-- Tokens are generated with `crypto/rand` and use the UUIDv7 layout.
-- Config files are atomically replaced and restricted to owner access.
-- IP addresses are parsed and canonicalized before being passed as firewall arguments. Commands run directly without a shell.
-- The handler accepts only an empty-body `POST /v1/allow`, applies request timeouts and a header-size limit, and never logs the Authorization header.
-- Protected-port rules affect host INPUT traffic only. They do not configure Docker forwarding, cloud security groups, or upstream network firewalls.
+- Bearer Token 使用恒定时间比较；成功和失败的请求都会受到速率限制。
+- Token 使用 `crypto/rand` 生成，并符合 UUIDv7 格式。
+- 配置文件以原子方式替换，并限制为文件所有者可访问。
+- IP 地址会先解析并规范化，再作为防火墙命令参数传入。执行命令时不经过 Shell。
+- API 仅接受空请求体的 `POST /v1/allow`，设置了请求超时和请求头大小上限，也不会记录 `Authorization` 请求头。
+- 受保护端口的规则只影响主机 INPUT 流量，不会配置 Docker 转发、云安全组或上游网络防火墙。
 
-## Build automation
+## 自动构建
 
-GitHub Actions builds Linux, macOS, and Windows binaries for supported architectures on pushes and pull requests. Pushing a `v*` tag also creates a GitHub Release with the compiled binaries and SHA-256 checksums.
+GitHub Actions 会在推送分支和 Pull Request 时，为支持的架构构建 Linux、macOS 和 Windows 二进制文件。推送 `v*` 格式的 tag 时，还会自动创建 GitHub Release，并上传编译产物及 SHA-256 校验文件。
