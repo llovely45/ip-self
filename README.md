@@ -25,7 +25,7 @@ exit "$result"
 
 ```sh
 sudo ip-self-install --update
-sudo ip-self-install --version v0.2.0
+sudo ip-self-install --version v0.2.1
 ip-self version
 ```
 

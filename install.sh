@@ -136,6 +136,6 @@ installed_version=$(/usr/local/bin/ip-self version 2>/dev/null || printf '%s' "$
 printf '已安装 ip-self %s（%s）到 /usr/local/bin/ip-self\n' "$installed_version" "$arch"
 if [ -x /usr/local/bin/ip-self-install ]; then
 	printf '%s\n' '手动升级到最新版本：sudo ip-self-install --update'
-	printf '%s\n' '安装指定版本：sudo ip-self-install --version v0.2.0'
+	printf '%s\n' '安装指定版本：sudo ip-self-install --version v0.2.1'
 fi
 printf '%s\n' '运行 sudo ip-self 打开初始化面板。'

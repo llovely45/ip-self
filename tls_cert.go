@@ -127,6 +127,9 @@ func parseTLSNames(value string) ([]string, []net.IP, []string, error) {
 		}
 
 		name = strings.ToLower(name)
+		if looksLikeIPv4Address(name) {
+			return nil, nil, nil, fmt.Errorf("invalid IPv4 certificate name %q", name)
+		}
 		if !validTLSDNSName(name) {
 			return nil, nil, nil, fmt.Errorf("invalid TLS DNS name %q; use ASCII/Punycode DNS names or IP addresses", name)
 		}
@@ -138,6 +141,18 @@ func parseTLSNames(value string) ([]string, []net.IP, []string, error) {
 		canonicalNames = append(canonicalNames, name)
 	}
 	return dnsNames, ipAddresses, canonicalNames, nil
+}
+
+func looksLikeIPv4Address(value string) bool {
+	if !strings.Contains(value, ".") {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func validTLSDNSName(name string) bool {
