@@ -1,0 +1,6 @@
+/dist/
+/work/
+/ip-self
+*.exe
+*.test
+coverage.out
