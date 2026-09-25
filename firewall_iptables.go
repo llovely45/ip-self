@@ -33,7 +33,7 @@ func setupIPTablesFamily(binary string, cfg Config) error {
 		return err
 	}
 	chainExists := false
-	managedJumps := 0
+	managedJumpPorts := make([]int, 0, 1)
 	transitionPorts := make(map[int]int)
 	for _, line := range strings.Split(all, "\n") {
 		line = strings.TrimSpace(line)
@@ -48,11 +48,11 @@ func setupIPTablesFamily(binary string, cfg Config) error {
 			continue
 		}
 		if strings.Contains(line, "-j "+iptablesChain) {
-			expected := fmt.Sprintf("-A INPUT -p tcp -m tcp --dport %d -m comment --comment ip-self-managed-jump -j %s", controlPort, iptablesChain)
-			if line != expected {
+			port, ok := parseManagedIPTablesJump(line)
+			if !ok {
 				return fmt.Errorf("%s INPUT has an unmanaged jump to %s; refusing to alter it", binary, iptablesChain)
 			}
-			managedJumps++
+			managedJumpPorts = append(managedJumpPorts, port)
 		}
 		if strings.Contains(line, "--comment ip-self-managed-transition") {
 			port, parseErr := parseTransitionPort(line)
@@ -86,6 +86,7 @@ func setupIPTablesFamily(binary string, cfg Config) error {
 		return err
 	}
 
+	controlPort := configuredControlPort(cfg)
 	if _, err := runIPTables(ctx, binary, []string{"-A", iptablesChain, "-p", "tcp", "--dport", fmt.Sprint(controlPort), "-m", "comment", "--comment", "ip-self-managed-control", "-j", "ACCEPT"}); err != nil {
 		return err
 	}
@@ -111,13 +112,14 @@ func setupIPTablesFamily(binary string, cfg Config) error {
 		return err
 	}
 
-	jumpArgs := []string{"-p", "tcp", "--dport", fmt.Sprint(controlPort), "-m", "comment", "--comment", "ip-self-managed-jump", "-j", iptablesChain}
-	for range managedJumps {
+	for _, oldPort := range managedJumpPorts {
+		jumpArgs := []string{"-p", "tcp", "--dport", fmt.Sprint(oldPort), "-m", "comment", "--comment", "ip-self-managed-jump", "-j", iptablesChain}
 		args := append([]string{"-D", "INPUT"}, jumpArgs...)
 		if _, err := runIPTables(ctx, binary, args); err != nil {
 			return err
 		}
 	}
+	jumpArgs := []string{"-p", "tcp", "--dport", fmt.Sprint(controlPort), "-m", "comment", "--comment", "ip-self-managed-jump", "-j", iptablesChain}
 	args := append([]string{"-I", "INPUT", "1"}, jumpArgs...)
 	if _, err := runIPTables(ctx, binary, args); err != nil {
 		return err
@@ -140,7 +142,7 @@ func parseTransitionPort(rule string) (int, error) {
 			continue
 		}
 		port, err := strconv.Atoi(fields[i+1])
-		if err != nil || port < 1 || port > 65535 || port == controlPort {
+		if err != nil || port < 1 || port > 65535 {
 			return 0, fmt.Errorf("invalid port")
 		}
 		expected := fmt.Sprintf("-A INPUT -p tcp -m tcp --dport %d -m comment --comment ip-self-managed-transition -j DROP", port)
@@ -150,6 +152,19 @@ func parseTransitionPort(rule string) (int, error) {
 		return port, nil
 	}
 	return 0, fmt.Errorf("missing destination port")
+}
+
+func parseManagedIPTablesJump(rule string) (int, bool) {
+	fields := strings.Fields(strings.TrimSpace(rule))
+	if len(fields) != 14 || fields[0] != "-A" || fields[1] != "INPUT" || fields[2] != "-p" || fields[3] != "tcp" || fields[4] != "-m" || fields[5] != "tcp" || fields[6] != "--dport" || fields[8] != "-m" || fields[9] != "comment" || fields[10] != "--comment" || fields[11] != "ip-self-managed-jump" || fields[12] != "-j" || fields[13] != iptablesChain {
+		return 0, false
+	}
+	port, err := strconv.Atoi(fields[7])
+	if err != nil || port < 1 || port > 65535 {
+		return 0, false
+	}
+	expected := fmt.Sprintf("-A INPUT -p tcp -m tcp --dport %d -m comment --comment ip-self-managed-jump -j %s", port, iptablesChain)
+	return port, rule == expected
 }
 
 func allowIPTables(cfg Config, ip netip.Addr) error {

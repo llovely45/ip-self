@@ -107,8 +107,7 @@ func preflightIPTablesBinary(ctx context.Context, binary string) error {
 		if !strings.HasPrefix(line, "-A INPUT ") || !strings.Contains(line, "-j "+iptablesChain) {
 			continue
 		}
-		expected := fmt.Sprintf("-A INPUT -p tcp -m tcp --dport %d -m comment --comment ip-self-managed-jump -j %s", controlPort, iptablesChain)
-		if line != expected {
+		if _, ok := parseManagedIPTablesJump(line); !ok {
 			return fmt.Errorf("%s INPUT has an unmanaged jump to %s; refusing to alter it", binary, iptablesChain)
 		}
 	}

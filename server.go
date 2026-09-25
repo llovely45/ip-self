@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/subtle"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,18 +76,6 @@ func serve(cfg Config, configPath string) error {
 	if err := validateConfig(cfg); err != nil {
 		return err
 	}
-	if cfg.TLSCertFile != "" {
-		if _, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil {
-			return fmt.Errorf("load TLS certificate and key: %w", err)
-		}
-		if info, err := os.Stat(cfg.TLSKeyFile); err != nil {
-			return fmt.Errorf("inspect TLS private key: %w", err)
-		} else if info.Mode().Perm()&0077 != 0 {
-			return errors.New("TLS private key permissions are too broad; restrict it to owner access (for example chmod 600)")
-		}
-	} else if !isLoopbackListener(cfg.ListenAddr) {
-		return errors.New("TLS certificate and key are required for a non-loopback listener")
-	}
 	state := &allowServer{
 		cfg:            cfg,
 		configPath:     configPath,
@@ -108,9 +95,6 @@ func serve(cfg Config, configPath string) error {
 		WriteTimeout:      90 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    4096,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
 	}
 	var activeConnections atomic.Int64
 	server.ConnState = func(conn net.Conn, state http.ConnState) {
@@ -131,16 +115,7 @@ func serve(cfg Config, configPath string) error {
 		listener.Close()
 		return fmt.Errorf("install firewall rules: %w", err)
 	}
-	if cfg.TLSCertFile != "" {
-		certificate, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
-		if err != nil {
-			listener.Close()
-			return fmt.Errorf("load TLS certificate and key: %w", err)
-		}
-		server.TLSConfig.Certificates = []tls.Certificate{certificate}
-		listener = tls.NewListener(listener, server.TLSConfig)
-	}
-	fmt.Fprintf(os.Stderr, "ip-self listening on %s; protected TCP ports: %s\n", cfg.ListenAddr, formatPorts(cfg.TargetPorts))
+	fmt.Fprintf(os.Stderr, "ip-self HTTP API listening on %s; protected TCP ports: %s\n", cfg.ListenAddr, formatPorts(cfg.TargetPorts))
 	if err := notifyBackgroundReady(); err != nil {
 		listener.Close()
 		return fmt.Errorf("signal API readiness: %w", err)
@@ -271,9 +246,6 @@ func writeJSON(w http.ResponseWriter, status int, body apiResponse) {
 func setSecurityHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.TLS != nil {
-		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
-	}
 }
 
 func remoteIP(remote string) (netip.Addr, error) {

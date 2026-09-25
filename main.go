@@ -102,7 +102,7 @@ func printUsage() {
 Usage:
   ip-self [--config PATH]             Open the interactive panel
   ip-self init [--config PATH]        Create the fixed UUIDv7 token and firewall config
-  ip-self serve [--config PATH]       Start the HTTPS control API
+  ip-self serve [--config PATH]       Start the HTTP control API
   ip-self firewall [--config PATH]   Reapply the managed firewall rules
   ip-self token [--config PATH]      Print the token
   ip-self status [--config PATH]     Show configuration status

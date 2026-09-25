@@ -44,7 +44,7 @@ func setupUFW(cfg Config) error {
 			return err
 		}
 	}
-	if _, err := runFirewallCommand(ctx, "ufw", []string{"insert", "1", "allow", fmt.Sprintf("%d/tcp", controlPort), "comment", ufwControlComment}, ""); err != nil {
+	if _, err := runFirewallCommand(ctx, "ufw", []string{"insert", "1", "allow", fmt.Sprintf("%d/tcp", configuredControlPort(cfg)), "comment", ufwControlComment}, ""); err != nil {
 		return err
 	}
 	for _, ipText := range sortedIPs(cfg.AllowedIPs) {

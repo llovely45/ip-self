@@ -101,7 +101,7 @@ func renderNFTTable(cfg Config) string {
 	}
 	out.WriteString("  }\n")
 	out.WriteString("  chain input { type filter hook input priority -10; policy accept;\n")
-	fmt.Fprintf(&out, "    tcp dport %d counter accept comment \"ip-self-managed-control\"\n", controlPort)
+	fmt.Fprintf(&out, "    tcp dport %d counter accept comment \"ip-self-managed-control\"\n", configuredControlPort(cfg))
 	for _, port := range cfg.TargetPorts {
 		fmt.Fprintf(&out, "    tcp dport %d ip saddr @allow4 counter accept comment \"ip-self-managed-allow\"\n", port)
 		fmt.Fprintf(&out, "    tcp dport %d ip6 saddr @allow6 counter accept comment \"ip-self-managed-allow\"\n", port)

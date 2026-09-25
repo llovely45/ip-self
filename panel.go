@@ -19,17 +19,20 @@ func runPanel(configPath string) error {
 		configured := loadErr == nil
 		fmt.Println("\nip-self 控制面板")
 		if configured {
-			fmt.Printf("API: %s | 防火墙: %s | 目标端口: %s | 已放行 IP: %d\n", cfg.ListenAddr, cfg.Firewall, formatPorts(cfg.TargetPorts), len(cfg.AllowedIPs))
+			fmt.Printf("HTTP API: %s | 防火墙: %s | 目标端口: %s | 已放行 IP: %d\n", cfg.ListenAddr, cfg.Firewall, formatPorts(cfg.TargetPorts), len(cfg.AllowedIPs))
 		} else if errors.Is(loadErr, os.ErrNotExist) {
 			fmt.Println("尚未初始化")
 		} else {
 			fmt.Printf("配置不可用: %v\n", loadErr)
 		}
-		fmt.Println("1) 初始化（生成固定 UUIDv7 Token 并选择目标端口与防火墙）")
+		fmt.Println("1) 初始化（生成固定 UUIDv7 Token 并选择监听端口、目标端口与防火墙）")
 		fmt.Println("2) 显示 Token")
 		fmt.Println("3) 查看状态和放行 IP")
 		fmt.Println("4) 重新应用防火墙规则")
-		fmt.Println("5) 后台启动 API 服务")
+		fmt.Println("5) 后台启动 HTTP API 服务")
+		fmt.Println("6) 修改 HTTP API 监听端口")
+		fmt.Println("7) 显示 API 地址和 curl 命令")
+		fmt.Println("8) 设置 curl 使用的服务器 IP/域名")
 		fmt.Println("0) 退出")
 		choice, err := prompt(reader, "选择")
 		if err != nil {
@@ -82,10 +85,36 @@ func runPanel(configPath string) error {
 				fmt.Println("后台启动 API 服务失败：", err)
 				continue
 			}
-			fmt.Printf("API 服务已在后台启动（PID %d）。\n", pid)
+			fmt.Printf("HTTP API 服务已在后台启动（PID %d）。\n", pid)
 			fmt.Printf("日志文件：%s\n", logPath)
 			fmt.Printf("停止服务：sudo kill %d\n", pid)
 			return nil
+		case "6":
+			if !configured {
+				fmt.Println("请先初始化。")
+				continue
+			}
+			if err := updateAPIListenPort(cfg, configPath, reader); err != nil {
+				fmt.Println("修改 API 监听端口失败：", err)
+			} else {
+				fmt.Println("API 监听端口和防火墙规则已更新。请重新启动 HTTP API 服务。")
+			}
+		case "7":
+			if !configured {
+				fmt.Println("请先初始化。")
+				continue
+			}
+			printCurlCommand(cfg)
+		case "8":
+			if !configured {
+				fmt.Println("请先初始化。")
+				continue
+			}
+			if err := updateAPIHost(cfg, configPath, reader); err != nil {
+				fmt.Println("设置服务器 IP/域名失败：", err)
+			} else {
+				fmt.Println("curl 访问地址已更新。")
+			}
 		case "0":
 			return nil
 		default:
@@ -111,22 +140,20 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 		return fmt.Errorf("inspect existing configuration: %w", err)
 	}
 
-	listenAddr, err := promptDefault(reader, "监听地址（端口固定 38853）", defaultListenAddr)
+	listenAddr, err := promptDefault(reader, "HTTP API 监听地址（例如 :38853 或 0.0.0.0:38853）", defaultListenAddr)
 	if err != nil {
 		return err
 	}
-	if _, port, err := net.SplitHostPort(listenAddr); err != nil || port != strconv.Itoa(controlPort) {
-		return fmt.Errorf("监听地址必须使用端口 %d，例如 :%d 或 127.0.0.1:%d", controlPort, controlPort, controlPort)
+	apiHost, err := promptAPIHost(reader)
+	if err != nil {
+		return err
 	}
-	var certFile, keyFile string
-	if !isLoopbackListener(listenAddr) {
-		certFile, keyFile, err = configureTLSWithReader(reader, configPath)
-		if err != nil {
-			return err
-		}
+	listenPort, err := portFromListenAddr(listenAddr)
+	if err != nil {
+		return errors.New("监听地址无效；端口必须在 1 到 65535 之间，例如 :38853 或 0.0.0.0:38853")
 	}
 
-	ports, err := promptPorts(reader)
+	ports, err := promptPorts(reader, listenPort)
 	if err != nil {
 		return err
 	}
@@ -150,7 +177,8 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 	if err := preflightFirewall(backend); err != nil {
 		return fmt.Errorf("firewall preflight failed before saving configuration: %w", err)
 	}
-	fmt.Printf("\n控制端口 TCP %d 将允许连接后再验证 TLS + Bearer。目标端口 TCP %s 将默认拒绝，只允许白名单来源。\n", controlPort, formatPorts(ports))
+	fmt.Printf("\nHTTP 控制端口 TCP %d 将允许连接后验证 Bearer。目标端口 TCP %s 将默认拒绝，只允许白名单来源。\n", listenPort, formatPorts(ports))
+	fmt.Println("注意：HTTP 不加密，Bearer Token 会以明文传输；请仅在可信网络或 VPN 中使用。")
 	fmt.Printf("所选防火墙：%s。初始白名单 IP 数：%d。\n", backend, len(allowedIPs))
 	if len(allowedIPs) == 0 {
 		fmt.Println("当前初始白名单为空；初始化后目标端口的新连接都会被拒绝。你可以从当前公网 IP 调用认证 API 加入白名单。")
@@ -170,8 +198,7 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 		Version:     1,
 		Token:       token,
 		ListenAddr:  listenAddr,
-		TLSCertFile: certFile,
-		TLSKeyFile:  keyFile,
+		APIHost:     apiHost,
 		Firewall:    backend,
 		TargetPorts: ports,
 		AllowedIPs:  allowedIPs,
@@ -216,7 +243,7 @@ func promptInitialIPs(reader *bufio.Reader) ([]string, error) {
 	}
 }
 
-func promptPorts(reader *bufio.Reader) ([]int, error) {
+func promptPorts(reader *bufio.Reader, controlPort int) ([]int, error) {
 	for {
 		text, err := prompt(reader, "受保护的目标 TCP 端口列表（逗号分隔，如 22,80,443）")
 		if err != nil {
@@ -242,6 +269,122 @@ func promptPorts(reader *bufio.Reader) ([]int, error) {
 		}
 		fmt.Printf("端口列表无效；请给出 1 至 %d 个不重复端口，且不能包含控制端口 %d。\n", maxTargetPorts, controlPort)
 	}
+}
+
+func printCurlCommand(cfg Config) {
+	host, portText, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil {
+		fmt.Printf("读取监听地址失败：%v\n", err)
+		return
+	}
+	if cfg.APIHost != "" {
+		host = cfg.APIHost
+	}
+	needsHost := host == "" || host == "0.0.0.0" || host == "::"
+	if needsHost {
+		host = "YOUR_SERVER_IP_OR_DOMAIN"
+	}
+	apiURL := "http://" + net.JoinHostPort(host, portText) + "/v1/allow"
+	fmt.Printf("API 地址：%s\n", apiURL)
+	fmt.Println("从要放行的客户端终端执行下面命令：")
+	if needsHost {
+		fmt.Println("请先把 YOUR_SERVER_IP_OR_DOMAIN 替换为服务器公网 IP 或域名。")
+	}
+	fmt.Println("printf 'Bearer Token: '")
+	fmt.Println("IFS= read -r -s IP_SELF_TOKEN")
+	fmt.Println("printf '\\n'")
+	fmt.Println("printf 'header = \"Authorization: Bearer %s\"\\n' \"$IP_SELF_TOKEN\" |")
+	fmt.Printf("  curl --config - --fail-with-body --request POST %s\n", shellQuote(apiURL))
+	fmt.Println("unset IP_SELF_TOKEN")
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func updateAPIListenPort(cfg Config, configPath string, reader *bufio.Reader) error {
+	if err := requireLinuxRoot(); err != nil {
+		return err
+	}
+	currentPort := configuredControlPort(cfg)
+	value, err := prompt(reader, fmt.Sprintf("新的 HTTP API 端口（当前 %d）", currentPort))
+	if err != nil {
+		return err
+	}
+	newPort, err := strconv.Atoi(value)
+	if err != nil || newPort < 1 || newPort > 65535 {
+		return errors.New("端口必须是 1 到 65535 之间的整数")
+	}
+	if newPort == currentPort {
+		return errors.New("新端口与当前端口相同")
+	}
+	for _, protectedPort := range cfg.TargetPorts {
+		if protectedPort == newPort {
+			return errors.New("API 监听端口不能同时作为受保护的业务端口")
+		}
+	}
+	if err := ensureAddressAvailable(cfg.ListenAddr); err != nil {
+		return fmt.Errorf("%w；请先停止 API 服务后再修改", err)
+	}
+	host, _, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("parse current listen address: %w", err)
+	}
+	newAddress := net.JoinHostPort(host, strconv.Itoa(newPort))
+	if err := ensureAddressAvailable(newAddress); err != nil {
+		return fmt.Errorf("new listen address is unavailable: %w", err)
+	}
+
+	updated := cfg
+	updated.ListenAddr = newAddress
+	if err := validateConfig(updated); err != nil {
+		return err
+	}
+	if err := saveConfig(configPath, updated); err != nil {
+		return err
+	}
+	if err := firewallSetup(updated); err != nil {
+		if rollbackErr := saveConfig(configPath, cfg); rollbackErr != nil {
+			return fmt.Errorf("apply new firewall rules: %v; restore old config: %w", err, rollbackErr)
+		}
+		if rollbackErr := firewallSetup(cfg); rollbackErr != nil {
+			return fmt.Errorf("apply new firewall rules: %v; restore old firewall rules: %w", err, rollbackErr)
+		}
+		return fmt.Errorf("apply new firewall rules: %w", err)
+	}
+	return nil
+}
+
+func ensureAddressAvailable(address string) error {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("%s is already in use or unavailable", address)
+	}
+	return listener.Close()
+}
+
+func promptAPIHost(reader *bufio.Reader) (string, error) {
+	for {
+		value, err := prompt(reader, "服务器公网 IP/域名（用于生成 curl，可留空后再设置）")
+		if err != nil {
+			return "", err
+		}
+		value = strings.TrimSpace(value)
+		if validAPIHost(value) {
+			return value, nil
+		}
+		fmt.Println("请输入不带协议、端口或路径的域名/IP，例如 45.202.246.167。")
+	}
+}
+
+func updateAPIHost(cfg Config, configPath string, reader *bufio.Reader) error {
+	value, err := promptAPIHost(reader)
+	if err != nil {
+		return err
+	}
+	updated := cfg
+	updated.APIHost = value
+	return saveConfig(configPath, updated)
 }
 
 func prompt(reader *bufio.Reader, label string) (string, error) {

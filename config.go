@@ -7,24 +7,29 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 const (
 	defaultListenAddr    = ":38853"
-	controlPort          = 38853
 	maxTargetPorts       = 32
 	maxAllowedIPs        = 256
 	maxManagedAllowRules = 1024
 )
 
 type Config struct {
-	Version     int      `json:"version"`
-	Token       string   `json:"token"`
-	ListenAddr  string   `json:"listen_addr"`
+	Version    int    `json:"version"`
+	Token      string `json:"token"`
+	ListenAddr string `json:"listen_addr"`
+	APIHost    string `json:"api_host,omitempty"`
+	// These legacy fields are retained so existing v0.2.x configurations load.
+	// The API now always uses plain HTTP and ignores both values.
 	TLSCertFile string   `json:"tls_cert_file,omitempty"`
 	TLSKeyFile  string   `json:"tls_key_file,omitempty"`
 	Firewall    string   `json:"firewall"`
@@ -170,11 +175,12 @@ func validateConfig(cfg Config) error {
 	if err := validateToken(cfg.Token); err != nil {
 		return err
 	}
-	if _, port, err := net.SplitHostPort(cfg.ListenAddr); err != nil || port != fmt.Sprint(controlPort) {
-		return fmt.Errorf("listen address must use TCP port %d", controlPort)
+	controlPort, err := portFromListenAddr(cfg.ListenAddr)
+	if err != nil {
+		return err
 	}
-	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
-		return errors.New("both TLS certificate and key paths must be set together")
+	if !validAPIHost(cfg.APIHost) {
+		return errors.New("API display host must be a DNS name or IP address without a scheme or port")
 	}
 	switch cfg.Firewall {
 	case "ufw", "iptables", "nftables":
@@ -212,6 +218,46 @@ func validateConfig(cfg Config) error {
 		seenIPs[value] = struct{}{}
 	}
 	return nil
+}
+
+func portFromListenAddr(address string) (int, error) {
+	_, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return 0, fmt.Errorf("invalid listen address: %w", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, errors.New("listen port must be between 1 and 65535")
+	}
+	return port, nil
+}
+
+func configuredControlPort(cfg Config) int {
+	port, _ := portFromListenAddr(cfg.ListenAddr)
+	return port
+}
+
+func validAPIHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.Zone() == ""
+	}
+	if len(host) > 253 || strings.ContainsAny(host, ":/\\ \t\r\n") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func sortedIPs(values []string) []string {
