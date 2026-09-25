@@ -25,7 +25,7 @@ exit "$result"
 
 ```sh
 sudo ip-self-install --update
-sudo ip-self-install --version v0.2.3
+sudo ip-self-install --version v0.2.4
 ip-self version
 ```
 
@@ -82,7 +82,7 @@ sudo ip-self serve
 
 `serve` 会先重新应用已保存的防火墙策略，再启动监听。前台方式适合交给 systemd 等服务管理器运行；需要后台运行时使用面板的第 5 项。
 
-选择 **6) 修改 HTTP API 监听端口** 可在初始化后调整控制端口。修改前需要先停止正在运行的 API 服务；程序会同步更新配置和它管理的防火墙规则。选择 **7) 显示 API 地址和 curl 命令** 可复制客户端调用示例。选择 **8) 设置 curl 使用的服务器 IP/域名** 可在初始化后补充或修改公网访问地址。若未设置公网地址，命令会使用 `YOUR_SERVER_IP_OR_DOMAIN` 占位符。
+选择 **6) 修改 HTTP API 监听端口** 可在初始化后调整控制端口。修改前需要先停止正在运行的 API 服务；程序会同步更新配置和它管理的防火墙规则。选择 **7) 显示 API 地址和 curl 命令** 会生成直接包含已保存 Token 的完整命令，无需再输入 Token。命令通过 curl 配置标准输入传递认证头，Token 不会进入 curl 进程参数；但复制到 shell 后可能保存在命令历史中，请勿转发或在共享终端执行。选择 **8) 设置 curl 使用的服务器 IP/域名** 可在初始化后补充或修改公网访问地址。若未设置公网地址，命令会使用 `YOUR_SERVER_IP_OR_DOMAIN` 占位符。
 
 ## API 调用
 

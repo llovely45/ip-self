@@ -290,12 +290,10 @@ func printCurlCommand(cfg Config) {
 	if needsHost {
 		fmt.Println("请先把 YOUR_SERVER_IP_OR_DOMAIN 替换为服务器公网 IP 或域名。")
 	}
-	fmt.Println("printf 'Bearer Token: '")
-	fmt.Println("IFS= read -r -s IP_SELF_TOKEN")
-	fmt.Println("printf '\\n'")
-	fmt.Println("printf 'header = \"Authorization: Bearer %s\"\\n' \"$IP_SELF_TOKEN\" |")
-	fmt.Printf("  curl --config - --fail-with-body --request POST %s\n", shellQuote(apiURL))
-	fmt.Println("unset IP_SELF_TOKEN")
+	fmt.Println("注意：命令包含完整 Token；粘贴到终端可能写入 shell 历史，请勿转发或保存到共享环境。HTTP 会明文传输 Token。")
+	fmt.Printf("curl --config - --fail-with-body --request POST %s <<'IP_SELF_CURL'\n", shellQuote(apiURL))
+	fmt.Printf("header = \"Authorization: Bearer %s\"\n", cfg.Token)
+	fmt.Println("IP_SELF_CURL")
 }
 
 func shellQuote(value string) string {
