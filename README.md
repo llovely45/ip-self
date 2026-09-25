@@ -31,6 +31,8 @@ ip-self version
 
 不带参数或使用 `--update` 会安装最新 Release；`--version` 后指定 Release 标签可以安装或回退到该版本。安装器会先校验 SHA-256。升级不会修改配置文件；如果服务正在运行，替换二进制后还需要重启该服务才能运行新版本。
 
+旧版安装如果还没有 `/usr/local/bin/ip-self-install`，请先重新运行上面的一键安装命令；安装器会一并安装更新命令。
+
 也可以从 [GitHub Releases](https://github.com/llovely45/ip-self/releases) 手动下载并安装，或使用 Go 从源码安装：
 
 ```sh
