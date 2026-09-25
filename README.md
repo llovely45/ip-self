@@ -11,29 +11,28 @@ API 通过固定的 UUIDv7 Bearer Token 认证。HTTP 不加密，Token 会以�
 适用于 Linux x86_64 和 ARM64。复制并运行：
 
 ```sh
-installer="$(mktemp)" &&
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh -o "$installer" &&
-sudo sh "$installer"
-result=$?
-rm -f "${installer:-}"
-exit "$result"
+bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh"
 ```
 
-安装脚本通过 HTTPS 下载 Linux 二进制文件和 `SHA256SUMS`，校验通过后安装到 `/usr/local/bin/ip-self`，并将更新器安装为 `/usr/local/bin/ip-self-install`。需要 `curl`、`sha256sum`（或 `shasum`）以及 root 权限。安装过程不会修改防火墙；安装后运行 `sudo ip-self`，通过交互面板检查并确认初始化配置。支持的架构为 `x86_64` 和 `aarch64`。
+安装脚本通过 HTTPS 下载 Linux 二进制文件和 `SHA256SUMS`，校验通过后安装到 `/usr/local/bin/ip-self`。需要 `bash`、`curl`、`sha256sum`（或 `shasum`）以及 root 权限。安装过程不会修改防火墙；安装后运行 `sudo ip-self`，通过交互面板检查并确认初始化配置。支持的架构为 `x86_64` 和 `aarch64`。
 
-安装器支持手动控制版本：
+### 更新或安装指定版本
+
+更新到最新版本：
 
 ```sh
-sudo ip-self-install --update
-sudo ip-self-install --version v0.2.4
-ip-self version
+bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh -s -- --update"
 ```
 
-不带参数或使用 `--update` 会安装最新 Release；`--version` 后指定 Release 标签可以安装或回退到该版本。安装器会先校验 SHA-256。升级不会修改配置文件；如果服务正在运行，替换二进制后还需要重启该服务才能运行新版本。
+安装指定版本或回退到某个 Release：
 
-旧版安装如果还没有 `/usr/local/bin/ip-self-install`，请先重新运行上面的一键安装命令；安装器会一并安装更新命令。
+```sh
+bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh -s -- --version v0.2.4"
+```
 
-从旧版本升级时不需要重新初始化。旧配置中的证书路径字段会为兼容保留但被忽略，API 将始终使用 HTTP。
+把 `v0.2.4` 换成目标 Release 标签即可。安装器会先校验 SHA-256。升级不会修改配置文件，也无需重新初始化；如果 API 服务正在运行，替换二进制后还需要重启服务才能运行新版本。
+
+旧版配置中的证书路径字段仅为兼容保留，API 始终使用 HTTP。
 
 也可以从 [GitHub Releases](https://github.com/llovely45/ip-self/releases) 手动下载并安装，或使用 Go 从源码安装：
 
