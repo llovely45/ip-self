@@ -6,13 +6,22 @@ The control port must remain reachable so clients can authenticate. It is protec
 
 ## Install and initialize
 
-Download a Linux binary from [GitHub Releases](https://github.com/llovely45/ip-self/releases) and register it as `/usr/local/bin/ip-self`:
+### One-line installer
+
+On Linux x86_64 or ARM64, run:
 
 ```sh
-sudo install -m 0755 ./ip-self_linux_amd64 /usr/local/bin/ip-self
+installer="$(mktemp)" &&
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh -o "$installer" &&
+sudo sh "$installer"
+result=$?
+rm -f "${installer:-}"
+exit "$result"
 ```
 
-Or install from source with Go and copy the binary into the system path:
+The installer downloads the latest Linux binary and `SHA256SUMS` over HTTPS, verifies the checksum, and installs to `/usr/local/bin/ip-self`. It requires `curl`, `sha256sum` (or `shasum`), and root privileges. It does not configure the firewall; run `sudo ip-self` after installation to review and apply the setup interactively. The supported architectures are `x86_64` and `aarch64`.
+
+You can also download an asset from [GitHub Releases](https://github.com/llovely45/ip-self/releases) and install it manually, or install from source with Go:
 
 ```sh
 go install github.com/llovely45/ip-self@latest
