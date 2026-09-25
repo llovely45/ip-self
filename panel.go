@@ -29,7 +29,7 @@ func runPanel(configPath string) error {
 		fmt.Println("2) 显示 Token")
 		fmt.Println("3) 查看状态和放行 IP")
 		fmt.Println("4) 重新应用防火墙规则")
-		fmt.Println("5) 启动 API 服务")
+		fmt.Println("5) 后台启动 API 服务")
 		fmt.Println("0) 退出")
 		choice, err := prompt(reader, "选择")
 		if err != nil {
@@ -77,7 +77,15 @@ func runPanel(configPath string) error {
 				fmt.Println("请先初始化。")
 				continue
 			}
-			return serve(cfg, configPath)
+			pid, logPath, err := startBackgroundServer(configPath)
+			if err != nil {
+				fmt.Println("后台启动 API 服务失败：", err)
+				continue
+			}
+			fmt.Printf("API 服务已在后台启动（PID %d）。\n", pid)
+			fmt.Printf("日志文件：%s\n", logPath)
+			fmt.Printf("停止服务：sudo kill %d\n", pid)
+			return nil
 		case "0":
 			return nil
 		default:

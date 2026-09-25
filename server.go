@@ -141,6 +141,10 @@ func serve(cfg Config, configPath string) error {
 		listener = tls.NewListener(listener, server.TLSConfig)
 	}
 	fmt.Fprintf(os.Stderr, "ip-self listening on %s; protected TCP ports: %s\n", cfg.ListenAddr, formatPorts(cfg.TargetPorts))
+	if err := notifyBackgroundReady(); err != nil {
+		listener.Close()
+		return fmt.Errorf("signal API readiness: %w", err)
+	}
 	err = server.Serve(listener)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil

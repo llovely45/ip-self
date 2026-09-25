@@ -62,24 +62,36 @@ sudo ip-self
 
 选择 UFW 时，UFW 必须已经处于启用状态。`ip-self` 不会替你启用 UFW，因为这可能改变主机全局防火墙状态或中断 SSH。程序会把带有自身标记的规则放在所选端口已有规则之前。使用 iptables 或 nftables 时，UFW 必须未启用。iptables 后端管理 IPv4 和 IPv6 的 INPUT 链。nftables 后端使用自有的 `inet ipself` 表；如果发现其中存在没有 `ip-self` 所有权注释的规则，程序会拒绝替换该表。
 
-可以从面板启动 API，也可以运行：
+在交互面板选择 **5) 后台启动 API 服务** 后，程序会分离启动服务、报告 PID 和日志路径，然后退出面板，不会继续占用当前终端。查看日志：
+
+```sh
+sudo tail -f /etc/ip-self/ip-self.log
+```
+
+停止后台服务时使用面板显示的 PID：
+
+```sh
+sudo kill <PID>
+```
+
+也可以在前台运行：
 
 ```sh
 sudo ip-self serve
 ```
 
-`serve` 会先重新应用已保存的防火墙策略，再启动监听。请保持该进程运行以接收请求。如果希望重启后自动恢复 iptables/nftables 规则，请配置系统服务管理器在开机后启动 `ip-self serve`。
+`serve` 会先重新应用已保存的防火墙策略，再启动监听。前台方式适合交给 systemd 等服务管理器运行；需要后台运行时使用面板的第 5 项。
 
 ## API 调用
 
 API 使用 TCP 连接的直连对端地址作为来源 IP。程序会忽略代理请求头，不接受请求体或客户端提供的目标 IP。以下示例假设服务器使用客户端默认信任的 TLS 证书；自签名证书的调用方式见后文。
 
 ```sh
-printf 'Token: '
-read -r -s IP_SELF_TOKEN
+printf 'Bearer Token: '
+IFS= read -r -s IP_SELF_TOKEN
 printf '\n'
-curl --fail-with-body -X POST \
-  -H "Authorization: Bearer ${IP_SELF_TOKEN}" \
+printf 'header = "Authorization: Bearer %s"\n' "$IP_SELF_TOKEN" |
+  curl --config - --fail-with-body --request POST \
   https://your-host.example:38853/v1/allow
 unset IP_SELF_TOKEN
 ```
@@ -88,11 +100,19 @@ unset IP_SELF_TOKEN
 
 不要把 Token 放进 URL、Shell 历史记录、源代码仓库或日志中。监听非回环地址时必须使用 TLS。如果使用反向代理，防火墙看到的来源 IP 将是代理地址；程序有意不支持信任 `X-Forwarded-For`。
 
-如果使用自签名证书，在上面的 `curl` 命令中增加证书参数，例如：
+如果使用自签名证书，请先通过 SSH 或其他可信渠道把服务器的公有证书 `/etc/ip-self/tls/server.crt` 复制到发起请求的客户端，并确认客户端访问地址与证书中的 IP/域名一致。以下示例不会把 Token 写进命令历史或 `curl` 命令行参数：
 
 ```sh
-curl --cacert ./server.crt --fail-with-body -X POST -H "Authorization: Bearer $IP_SELF_TOKEN" https://api.example.com:38853/v1/allow
+printf 'Bearer Token: '
+IFS= read -r -s IP_SELF_TOKEN
+printf '\n'
+printf 'header = "Authorization: Bearer %s"\n' "$IP_SELF_TOKEN" |
+  curl --config - --cacert ./server.crt --fail-with-body --request POST \
+  https://api.example.com:38853/v1/allow
+unset IP_SELF_TOKEN
 ```
+
+请替换为实际的 API 地址，并将 `./server.crt` 指向复制到客户端的证书。请求必须从希望加入白名单的网络发出；服务器只采用 TCP 直连来源 IP。
 
 ## 安全措施
 
