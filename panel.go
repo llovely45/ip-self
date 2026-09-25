@@ -19,7 +19,7 @@ func runPanel(configPath string) error {
 		configured := loadErr == nil
 		fmt.Println("\nip-self 控制面板")
 		if configured {
-			fmt.Printf("HTTP API: %s | 防火墙: %s | 目标端口: %s | 已放行 IP: %d\n", cfg.ListenAddr, cfg.Firewall, formatPorts(cfg.TargetPorts), len(cfg.AllowedIPs))
+			fmt.Printf("HTTP API: %s | 防火墙: %s | TCP: %s | UDP: %s | 已放行 IP: %d\n", cfg.ListenAddr, cfg.Firewall, formatPorts(cfg.TargetPorts), formatPorts(cfg.UDPPorts), len(cfg.AllowedIPs))
 		} else if errors.Is(loadErr, os.ErrNotExist) {
 			fmt.Println("尚未初始化")
 		} else {
@@ -33,6 +33,7 @@ func runPanel(configPath string) error {
 		fmt.Println("6) 修改 HTTP API 监听端口")
 		fmt.Println("7) 显示 API 地址和 curl 命令")
 		fmt.Println("8) 设置 curl 使用的服务器 IP/域名")
+		fmt.Println("9) 修改受保护的 TCP/UDP 端口")
 		fmt.Println("0) 退出")
 		choice, err := prompt(reader, "选择")
 		if err != nil {
@@ -70,7 +71,9 @@ func runPanel(configPath string) error {
 				fmt.Println("请先初始化。")
 				continue
 			}
-			if err := firewallSetup(cfg); err != nil {
+			if err := persistConfigMigration(configPath, &cfg); err != nil {
+				fmt.Println("升级配置失败：", err)
+			} else if err := firewallSetup(cfg); err != nil {
 				fmt.Println("应用防火墙规则失败：", err)
 			} else {
 				fmt.Println("防火墙规则已重新应用。")
@@ -115,6 +118,16 @@ func runPanel(configPath string) error {
 			} else {
 				fmt.Println("curl 访问地址已更新。")
 			}
+		case "9":
+			if !configured {
+				fmt.Println("请先初始化。")
+				continue
+			}
+			if err := updateProtectedPorts(cfg, configPath, reader); err != nil {
+				fmt.Println("修改受保护端口失败：", err)
+			} else {
+				fmt.Println("受保护 TCP/UDP 端口和防火墙规则已更新。")
+			}
 		case "0":
 			return nil
 		default:
@@ -153,7 +166,7 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 		return errors.New("监听地址无效；端口必须在 1 到 65535 之间，例如 :38853 或 0.0.0.0:38853")
 	}
 
-	ports, err := promptPorts(reader, listenPort)
+	tcpPorts, udpPorts, err := promptTargetPorts(reader, listenPort)
 	if err != nil {
 		return err
 	}
@@ -177,7 +190,8 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 	if err := preflightFirewall(backend); err != nil {
 		return fmt.Errorf("firewall preflight failed before saving configuration: %w", err)
 	}
-	fmt.Printf("\nHTTP 控制端口 TCP %d 将允许连接后验证 Bearer。目标端口 TCP %s 将默认拒绝，只允许白名单来源。\n", listenPort, formatPorts(ports))
+	fmt.Printf("\nHTTP 控制端口 TCP %d 将允许连接后验证 Bearer。\n", listenPort)
+	fmt.Printf("目标端口 TCP %s、UDP %s 将默认拒绝，只允许白名单来源。\n", formatPorts(tcpPorts), formatPorts(udpPorts))
 	fmt.Println("注意：HTTP 不加密，Bearer Token 会以明文传输；请仅在可信网络或 VPN 中使用。")
 	fmt.Printf("所选防火墙：%s。初始白名单 IP 数：%d。\n", backend, len(allowedIPs))
 	if len(allowedIPs) == 0 {
@@ -195,12 +209,13 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 		return err
 	}
 	cfg := Config{
-		Version:     1,
+		Version:     currentConfigVersion,
 		Token:       token,
 		ListenAddr:  listenAddr,
 		APIHost:     apiHost,
 		Firewall:    backend,
-		TargetPorts: ports,
+		TargetPorts: tcpPorts,
+		UDPPorts:    udpPorts,
 		AllowedIPs:  allowedIPs,
 	}
 	if err := saveConfig(configPath, cfg); err != nil {
@@ -243,11 +258,31 @@ func promptInitialIPs(reader *bufio.Reader) ([]string, error) {
 	}
 }
 
-func promptPorts(reader *bufio.Reader, controlPort int) ([]int, error) {
+func promptTargetPorts(reader *bufio.Reader, controlPort int) ([]int, []int, error) {
 	for {
-		text, err := prompt(reader, "受保护的目标 TCP 端口列表（逗号分隔，如 22,80,443）")
+		tcpPorts, err := promptPortList(reader, "TCP", controlPort)
+		if err != nil {
+			return nil, nil, err
+		}
+		udpPorts, err := promptPortList(reader, "UDP", controlPort)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(tcpPorts)+len(udpPorts) > 0 && len(tcpPorts)+len(udpPorts) <= maxTargetPorts {
+			return tcpPorts, udpPorts, nil
+		}
+		fmt.Printf("TCP 和 UDP 端口条目总数必须为 1 至 %d，且不能包含控制端口 %d。\n", maxTargetPorts, controlPort)
+	}
+}
+
+func promptPortList(reader *bufio.Reader, protocol string, controlPort int) ([]int, error) {
+	for {
+		text, err := prompt(reader, fmt.Sprintf("受保护的 %s 端口列表（逗号分隔，如 %s；可留空）", protocol, examplePorts(protocol)))
 		if err != nil {
 			return nil, err
+		}
+		if strings.TrimSpace(text) == "" {
+			return []int{}, nil
 		}
 		parts := strings.Split(text, ",")
 		ports := make([]int, 0, len(parts))
@@ -263,12 +298,19 @@ func promptPorts(reader *bufio.Reader, controlPort int) ([]int, error) {
 			seen[port] = true
 			ports = append(ports, port)
 		}
-		if valid && len(ports) > 0 && len(ports) <= maxTargetPorts {
+		if valid && len(ports) <= maxPortsPerProtocol {
 			sort.Ints(ports)
 			return ports, nil
 		}
-		fmt.Printf("端口列表无效；请给出 1 至 %d 个不重复端口，且不能包含控制端口 %d。\n", maxTargetPorts, controlPort)
+		fmt.Printf("端口列表无效；请给出最多 %d 个不重复端口，且不能包含控制端口 %d。\n", maxPortsPerProtocol, controlPort)
 	}
+}
+
+func examplePorts(protocol string) string {
+	if protocol == "UDP" {
+		return "53"
+	}
+	return "22,80,443"
 }
 
 func printCurlCommand(cfg Config) {
@@ -316,8 +358,8 @@ func updateAPIListenPort(cfg Config, configPath string, reader *bufio.Reader) er
 	if newPort == currentPort {
 		return errors.New("新端口与当前端口相同")
 	}
-	for _, protectedPort := range cfg.TargetPorts {
-		if protectedPort == newPort {
+	for _, target := range configuredPortRules(cfg) {
+		if target.port == newPort {
 			return errors.New("API 监听端口不能同时作为受保护的业务端口")
 		}
 	}
@@ -337,6 +379,48 @@ func updateAPIListenPort(cfg Config, configPath string, reader *bufio.Reader) er
 	updated.ListenAddr = newAddress
 	if err := validateConfig(updated); err != nil {
 		return err
+	}
+	if err := saveConfig(configPath, updated); err != nil {
+		return err
+	}
+	if err := firewallSetup(updated); err != nil {
+		if rollbackErr := saveConfig(configPath, cfg); rollbackErr != nil {
+			return fmt.Errorf("apply new firewall rules: %v; restore old config: %w", err, rollbackErr)
+		}
+		if rollbackErr := firewallSetup(cfg); rollbackErr != nil {
+			return fmt.Errorf("apply new firewall rules: %v; restore old firewall rules: %w", err, rollbackErr)
+		}
+		return fmt.Errorf("apply new firewall rules: %w", err)
+	}
+	return nil
+}
+
+func updateProtectedPorts(cfg Config, configPath string, reader *bufio.Reader) error {
+	if err := requireLinuxRoot(); err != nil {
+		return err
+	}
+	if err := ensureAddressAvailable(cfg.ListenAddr); err != nil {
+		return fmt.Errorf("请先停止 API 服务再修改业务端口：%w", err)
+	}
+	tcpPorts, udpPorts, err := promptTargetPorts(reader, configuredControlPort(cfg))
+	if err != nil {
+		return err
+	}
+	updated := cfg
+	updated.Version = currentConfigVersion
+	updated.TargetPorts = tcpPorts
+	updated.UDPPorts = udpPorts
+	updated.needsMigration = false
+	if err := validateConfig(updated); err != nil {
+		return err
+	}
+	fmt.Printf("新规则：TCP %s；UDP %s。", formatPorts(tcpPorts), formatPorts(udpPorts))
+	confirmation, err := prompt(reader, "输入 APPLY 以应用防火墙规则")
+	if err != nil {
+		return err
+	}
+	if confirmation != "APPLY" {
+		return errors.New("firewall update cancelled")
 	}
 	if err := saveConfig(configPath, updated); err != nil {
 		return err
@@ -412,6 +496,7 @@ func printStatus(cfg Config, configPath string) {
 	fmt.Printf("  Token: UUIDv7（固定；使用 `ip-self token` 查看）\n")
 	fmt.Printf("  防火墙: %s\n", cfg.Firewall)
 	fmt.Printf("  受保护 TCP 端口: %s\n", formatPorts(cfg.TargetPorts))
+	fmt.Printf("  受保护 UDP 端口: %s\n", formatPorts(cfg.UDPPorts))
 	fmt.Printf("  已放行 IP: %d\n", len(cfg.AllowedIPs))
 	for _, ip := range cfg.AllowedIPs {
 		fmt.Printf("    %s\n", ip)

@@ -18,9 +18,11 @@ import (
 
 const (
 	defaultListenAddr    = ":38853"
-	maxTargetPorts       = 32
+	currentConfigVersion = 2
+	maxPortsPerProtocol  = 32
+	maxTargetPorts       = maxPortsPerProtocol * 2
 	maxAllowedIPs        = 256
-	maxManagedAllowRules = 1024
+	maxManagedAllowRules = 2048
 )
 
 type Config struct {
@@ -30,11 +32,13 @@ type Config struct {
 	APIHost    string `json:"api_host,omitempty"`
 	// These legacy fields are retained so existing v0.2.x configurations load.
 	// The API now always uses plain HTTP and ignores both values.
-	TLSCertFile string   `json:"tls_cert_file,omitempty"`
-	TLSKeyFile  string   `json:"tls_key_file,omitempty"`
-	Firewall    string   `json:"firewall"`
-	TargetPorts []int    `json:"target_tcp_ports"`
-	AllowedIPs  []string `json:"allowed_ips"`
+	TLSCertFile    string   `json:"tls_cert_file,omitempty"`
+	TLSKeyFile     string   `json:"tls_key_file,omitempty"`
+	Firewall       string   `json:"firewall"`
+	TargetPorts    []int    `json:"target_tcp_ports"`
+	UDPPorts       []int    `json:"target_udp_ports"`
+	AllowedIPs     []string `json:"allowed_ips"`
+	needsMigration bool     `json:"-"`
 }
 
 func defaultConfigPath() string {
@@ -81,6 +85,13 @@ func loadConfig(path string) (Config, error) {
 	var trailing any
 	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return cfg, errors.New("configuration contains trailing data")
+	}
+	if cfg.Version == 1 {
+		if cfg.UDPPorts == nil {
+			cfg.UDPPorts = append([]int{}, cfg.TargetPorts...)
+		}
+		cfg.Version = currentConfigVersion
+		cfg.needsMigration = true
 	}
 	if err := validateConfig(cfg); err != nil {
 		return cfg, err
@@ -147,6 +158,17 @@ func saveConfig(path string, cfg Config) error {
 	return nil
 }
 
+func persistConfigMigration(path string, cfg *Config) error {
+	if !cfg.needsMigration {
+		return nil
+	}
+	if err := saveConfig(path, *cfg); err != nil {
+		return fmt.Errorf("save migrated TCP/UDP configuration: %w", err)
+	}
+	cfg.needsMigration = false
+	return nil
+}
+
 func validateConfigDirectory(path string) error {
 	current := filepath.Clean(path)
 	for {
@@ -169,7 +191,7 @@ func validateConfigDirectory(path string) error {
 }
 
 func validateConfig(cfg Config) error {
-	if cfg.Version != 1 {
+	if cfg.Version != currentConfigVersion {
 		return fmt.Errorf("unsupported configuration version %d", cfg.Version)
 	}
 	if err := validateToken(cfg.Token); err != nil {
@@ -187,23 +209,32 @@ func validateConfig(cfg Config) error {
 	default:
 		return errors.New("firewall must be ufw, iptables, or nftables")
 	}
-	if len(cfg.TargetPorts) == 0 || len(cfg.TargetPorts) > maxTargetPorts {
-		return fmt.Errorf("configure between 1 and %d protected TCP ports", maxTargetPorts)
+	portRules := configuredPortRules(cfg)
+	if len(portRules) == 0 || len(portRules) > maxTargetPorts {
+		return fmt.Errorf("configure between 1 and %d protected TCP/UDP port entries total", maxTargetPorts)
 	}
-	seenPorts := make(map[int]struct{}, len(cfg.TargetPorts))
-	for _, port := range cfg.TargetPorts {
-		if port < 1 || port > 65535 || port == controlPort {
-			return fmt.Errorf("invalid protected TCP port %d (control port %d cannot be protected)", port, controlPort)
+	for _, protocolPorts := range []struct {
+		protocol string
+		ports    []int
+	}{{protocol: "tcp", ports: cfg.TargetPorts}, {protocol: "udp", ports: cfg.UDPPorts}} {
+		if len(protocolPorts.ports) > maxPortsPerProtocol {
+			return fmt.Errorf("configure no more than %d protected %s ports", maxPortsPerProtocol, protocolPorts.protocol)
 		}
-		if _, ok := seenPorts[port]; ok {
-			return fmt.Errorf("duplicate protected TCP port %d", port)
+		seenPorts := make(map[int]struct{}, len(protocolPorts.ports))
+		for _, port := range protocolPorts.ports {
+			if port < 1 || port > 65535 || port == controlPort {
+				return fmt.Errorf("invalid protected %s port %d (control port %d cannot be protected)", protocolPorts.protocol, port, controlPort)
+			}
+			if _, ok := seenPorts[port]; ok {
+				return fmt.Errorf("duplicate protected %s port %d", protocolPorts.protocol, port)
+			}
+			seenPorts[port] = struct{}{}
 		}
-		seenPorts[port] = struct{}{}
 	}
 	if len(cfg.AllowedIPs) > maxAllowedIPs {
 		return fmt.Errorf("allowlist exceeds the %d address limit", maxAllowedIPs)
 	}
-	if len(cfg.AllowedIPs)*len(cfg.TargetPorts) > maxManagedAllowRules {
+	if len(cfg.AllowedIPs)*len(portRules) > maxManagedAllowRules {
 		return fmt.Errorf("allowlist and target ports would exceed the %d managed firewall rule limit", maxManagedAllowRules)
 	}
 	seenIPs := make(map[string]struct{}, len(cfg.AllowedIPs))

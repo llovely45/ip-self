@@ -115,7 +115,7 @@ func serve(cfg Config, configPath string) error {
 		listener.Close()
 		return fmt.Errorf("install firewall rules: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "ip-self HTTP API listening on %s; protected TCP ports: %s\n", cfg.ListenAddr, formatPorts(cfg.TargetPorts))
+	fmt.Fprintf(os.Stderr, "ip-self HTTP API listening on %s; protected TCP ports: %s; UDP ports: %s\n", cfg.ListenAddr, formatPorts(cfg.TargetPorts), formatPorts(cfg.UDPPorts))
 	if err := notifyBackgroundReady(); err != nil {
 		listener.Close()
 		return fmt.Errorf("signal API readiness: %w", err)
@@ -191,7 +191,14 @@ func (s *allowServer) handleAllow(w http.ResponseWriter, r *http.Request) {
 	if added {
 		status = "allowed"
 	}
-	writeJSON(w, http.StatusOK, apiResponse{OK: true, Status: status, IP: ip.String(), Ports: append([]int(nil), s.cfg.TargetPorts...)})
+	writeJSON(w, http.StatusOK, apiResponse{
+		OK:       true,
+		Status:   status,
+		IP:       ip.String(),
+		Ports:    append([]int(nil), s.cfg.TargetPorts...),
+		TCPPorts: append([]int(nil), s.cfg.TargetPorts...),
+		UDPPorts: append([]int(nil), s.cfg.UDPPorts...),
+	})
 }
 
 func (s *allowServer) addIP(ip netip.Addr) (bool, error) {
@@ -209,7 +216,7 @@ func (s *allowServer) addIP(ip netip.Addr) (bool, error) {
 	next := old
 	next.AllowedIPs = append(append([]string(nil), old.AllowedIPs...), ip.String())
 	next.AllowedIPs = sortedIPs(next.AllowedIPs)
-	if len(next.AllowedIPs)*len(next.TargetPorts) > maxManagedAllowRules {
+	if len(next.AllowedIPs)*len(configuredPortRules(next)) > maxManagedAllowRules {
 		return false, fmt.Errorf("managed firewall rule limit reached")
 	}
 	if err := saveConfig(s.configPath, next); err != nil {
@@ -230,11 +237,13 @@ func (s *allowServer) addIP(ip netip.Addr) (bool, error) {
 }
 
 type apiResponse struct {
-	OK     bool   `json:"ok"`
-	Status string `json:"status,omitempty"`
-	IP     string `json:"ip,omitempty"`
-	Ports  []int  `json:"ports,omitempty"`
-	Error  string `json:"error,omitempty"`
+	OK       bool   `json:"ok"`
+	Status   string `json:"status,omitempty"`
+	IP       string `json:"ip,omitempty"`
+	Ports    []int  `json:"ports,omitempty"`
+	TCPPorts []int  `json:"tcp_ports,omitempty"`
+	UDPPorts []int  `json:"udp_ports,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, body apiResponse) {

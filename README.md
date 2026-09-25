@@ -1,6 +1,6 @@
 # ip-self
 
-`ip-self` 是一个用于管理 Linux IP 白名单的工具。控制 API 使用纯 HTTP，监听交互面板配置的 TCP 端口（默认 **38853**）。客户端向 `POST /v1/allow` 发送有效认证请求后，程序会把 TCP 直连来源 IP 加入交互面板所配置的业务端口防火墙白名单。
+`ip-self` 是一个用于管理 Linux IP 白名单的工具。控制 API 使用纯 HTTP，监听交互面板配置的 TCP 端口（默认 **38853**）。客户端向 `POST /v1/allow` 发送有效认证请求后，程序会把 TCP 直连来源 IP 加入交互面板所配置的 TCP/UDP 业务端口防火墙白名单。
 
 API 通过固定的 UUIDv7 Bearer Token 认证。HTTP 不加密，Token 会以明文在网络上传输，可能被同一网络路径上的第三方读取或重放；建议只在可信网络或 VPN 中使用，不要直接暴露在不可信公网。所选业务端口会设置为默认拒绝，再为白名单中的来源 IP 添加放行规则。控制端口不能作为业务端口。
 
@@ -27,10 +27,10 @@ bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubuse
 安装指定版本或回退到某个 Release：
 
 ```sh
-bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh -s -- --version v0.2.4"
+bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh -s -- --version v0.2.5"
 ```
 
-把 `v0.2.4` 换成目标 Release 标签即可。安装器会先校验 SHA-256。升级不会修改配置文件，也无需重新初始化；如果 API 服务正在运行，替换二进制后还需要重启服务才能运行新版本。
+把 `v0.2.5` 换成目标 Release 标签即可。安装器会先校验 SHA-256。升级不会清除配置或白名单；首次启动新版本时，旧配置的 TCP 端口列表会自动复制到 UDP，以便原端口同时应用两种协议的规则。之后可在交互面板第 9 项分别调整 TCP 和 UDP 端口。如果 API 服务正在运行，替换二进制后还需要重启服务才能运行新版本。
 
 旧版配置中的证书路径字段仅为兼容保留，API 始终使用 HTTP。
 
@@ -51,11 +51,12 @@ sudo ip-self
 
 1. HTTP API 监听地址，默认 `:38853`，端口可配置。使用 `:端口` 监听全部接口；也可以指定本机地址。
 2. 服务器公网 IP/域名（可留空），用于生成可以直接复制的 curl 地址。
-3. 要保护的业务 TCP 端口，例如 `22,80,443`。
-4. 可选的初始可信来源 IP。
-5. 选择 UFW、iptables 或 nftables，并输入 `APPLY` 明确确认应用规则。
+3. 要保护的业务 TCP 端口列表，例如 `22,80,443`；可留空。
+4. 要保护的业务 UDP 端口列表，例如 `53`；可留空。TCP 和 UDP 各自最多 32 个端口（总计最多 64 条规则），不能包含控制端口。
+5. 可选的初始可信来源 IP。
+6. 选择 UFW、iptables 或 nftables，并输入 `APPLY` 明确确认应用规则。
 
-所选业务端口默认拒绝白名单以外来源的连接。如果业务端口包含 SSH（`22`），请在初始化时加入当前管理 IP；否则，在建立新的 SSH 连接前，需要先从该 IP 成功调用 API。若初始白名单为空，所选业务端口的新连接会被拒绝，直到第一次 API 调用成功。
+所选 TCP/UDP 业务端口默认拒绝白名单以外来源的流量。如果 TCP 端口包含 SSH（`22`），请在初始化时加入当前管理 IP；否则，在建立新的 SSH 连接前，需要先从该 IP 成功调用 API。若初始白名单为空，所选业务端口的新流量会被拒绝，直到第一次 API 调用成功。
 
 初始化时，程序会生成一个使用密码学安全随机数创建的 UUIDv7 Token，并以 `0600` 权限保存在受保护目录中的 `/etc/ip-self/config.json`。Token 创建后固定不变，面板不会覆盖它。请安全保存面板显示的 Token；之后可在面板选择 **显示 Token**，或运行 `sudo ip-self token` 查看。
 
@@ -81,7 +82,7 @@ sudo ip-self serve
 
 `serve` 会先重新应用已保存的防火墙策略，再启动监听。前台方式适合交给 systemd 等服务管理器运行；需要后台运行时使用面板的第 5 项。
 
-选择 **6) 修改 HTTP API 监听端口** 可在初始化后调整控制端口。修改前需要先停止正在运行的 API 服务；程序会同步更新配置和它管理的防火墙规则。选择 **7) 显示 API 地址和 curl 命令** 会生成直接包含已保存 Token 的完整命令，无需再输入 Token。命令通过 curl 配置标准输入传递认证头，Token 不会进入 curl 进程参数；但复制到 shell 后可能保存在命令历史中，请勿转发或在共享终端执行。选择 **8) 设置 curl 使用的服务器 IP/域名** 可在初始化后补充或修改公网访问地址。若未设置公网地址，命令会使用 `YOUR_SERVER_IP_OR_DOMAIN` 占位符。
+选择 **6) 修改 HTTP API 监听端口** 可在初始化后调整控制端口。修改前需要先停止正在运行的 API 服务；程序会同步更新配置和它管理的防火墙规则。选择 **7) 显示 API 地址和 curl 命令** 会生成直接包含已保存 Token 的完整命令，无需再输入 Token。命令通过 curl 配置标准输入传递认证头，Token 不会进入 curl 进程参数；但复制到 shell 后可能保存在命令历史中，请勿转发或在共享终端执行。选择 **8) 设置 curl 使用的服务器 IP/域名** 可在初始化后补充或修改公网访问地址。若未设置公网地址，命令会使用 `YOUR_SERVER_IP_OR_DOMAIN` 占位符。选择 **9) 修改受保护的 TCP/UDP 端口** 可分别更新两组端口；需要先停止 API 服务，并输入 `APPLY` 确认变更。
 
 ## API 调用
 
@@ -97,7 +98,7 @@ printf 'header = "Authorization: Bearer %s"\n' "$IP_SELF_TOKEN" |
 unset IP_SELF_TOKEN
 ```
 
-成功时会以 JSON 返回来源 IP 和已配置的端口。相同 IP 可以安全地重复调用。生成的防火墙规则会保存在配置中，并在 `ip-self serve` 启动时恢复。不要把 Token 放进 URL、Shell 历史记录、源代码仓库或日志中。上面的命令会隐藏 Token 输入，并通过标准输入交给 curl，避免 Token 出现在 curl 命令行参数中。
+成功时会以 JSON 返回来源 IP、TCP 端口和 UDP 端口；旧版 `ports` 字段仍表示 TCP 端口。相同 IP 可以安全地重复调用。生成的防火墙规则会保存在配置中，并在 `ip-self serve` 启动时恢复。不要把 Token 放进 URL、Shell 历史记录、源代码仓库或日志中。上面的命令会隐藏 Token 输入，并通过标准输入交给 curl，避免 Token 出现在 curl 命令行参数中。
 
 ## 安全措施
 
@@ -107,7 +108,7 @@ unset IP_SELF_TOKEN
 - IP 地址会先解析并规范化，再作为防火墙命令参数传入。执行命令时不经过 Shell。
 - API 仅接受空请求体的 `POST /v1/allow`，设置了请求超时和请求头大小上限，也不会记录 `Authorization` 请求头。
 - API 使用明文 HTTP；不要在不可信网络中传输 Bearer Token。需要跨公网使用时，应先通过 VPN 或 SSH 隧道建立可信链路。
-- 受保护端口的规则只影响主机 INPUT 流量，不会配置 Docker 转发、云安全组或上游网络防火墙。
+- 受保护 TCP/UDP 端口的规则只影响主机 INPUT 流量，不会配置 Docker 转发、云安全组或上游网络防火墙。
 
 ## 自动构建
 

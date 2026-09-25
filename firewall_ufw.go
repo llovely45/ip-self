@@ -39,8 +39,8 @@ func setupUFW(cfg Config) error {
 	if err := removeManagedUFWRules(ctx); err != nil {
 		return err
 	}
-	for _, port := range cfg.TargetPorts {
-		if _, err := runFirewallCommand(ctx, "ufw", []string{"insert", "1", "deny", fmt.Sprintf("%d/tcp", port), "comment", ufwGuardComment}, ""); err != nil {
+	for _, target := range configuredPortRules(cfg) {
+		if _, err := runFirewallCommand(ctx, "ufw", []string{"insert", "1", "deny", fmt.Sprintf("%d/%s", target.port, target.protocol), "comment", ufwGuardComment}, ""); err != nil {
 			return err
 		}
 	}
@@ -75,20 +75,20 @@ func ensureUFWTransitions(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	for _, port := range cfg.TargetPorts {
+	for _, target := range configuredPortRules(cfg) {
 		found := false
 		for _, line := range strings.Split(status, "\n") {
 			if !strings.Contains(line, ufwTransitionComment) {
 				continue
 			}
 			for _, field := range strings.Fields(line) {
-				if field == fmt.Sprintf("%d/tcp", port) {
+				if field == fmt.Sprintf("%d/%s", target.port, target.protocol) {
 					found = true
 				}
 			}
 		}
 		if !found {
-			args := []string{"insert", "1", "deny", fmt.Sprintf("%d/tcp", port), "comment", ufwTransitionComment}
+			args := []string{"insert", "1", "deny", fmt.Sprintf("%d/%s", target.port, target.protocol), "comment", ufwTransitionComment}
 			if _, err := runFirewallCommand(ctx, "ufw", args, ""); err != nil {
 				return err
 			}
@@ -161,8 +161,8 @@ func allowUFW(cfg Config, ip netip.Addr) error {
 }
 
 func applyUFWAllow(ctx context.Context, cfg Config, ip netip.Addr) error {
-	for _, port := range cfg.TargetPorts {
-		args := []string{"insert", "1", "allow", "from", ip.String(), "to", "any", "port", strconv.Itoa(port), "proto", "tcp", "comment", ufwAllowComment}
+	for _, target := range configuredPortRules(cfg) {
+		args := []string{"insert", "1", "allow", "from", ip.String(), "to", "any", "port", strconv.Itoa(target.port), "proto", target.protocol, "comment", ufwAllowComment}
 		if _, err := runFirewallCommand(ctx, "ufw", args, ""); err != nil {
 			return err
 		}

@@ -9,6 +9,22 @@ import (
 	"strings"
 )
 
+type protocolPort struct {
+	protocol string
+	port     int
+}
+
+func configuredPortRules(cfg Config) []protocolPort {
+	rules := make([]protocolPort, 0, len(cfg.TargetPorts)+len(cfg.UDPPorts))
+	for _, port := range cfg.TargetPorts {
+		rules = append(rules, protocolPort{protocol: "tcp", port: port})
+	}
+	for _, port := range cfg.UDPPorts {
+		rules = append(rules, protocolPort{protocol: "udp", port: port})
+	}
+	return rules
+}
+
 func requireLinuxRoot() error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("firewall management is supported on Linux only (current OS: %s)", runtime.GOOS)

@@ -35,6 +35,9 @@ func main() {
 		var cfg Config
 		cfg, err = loadConfig(configPath)
 		if err == nil {
+			err = persistConfigMigration(configPath, &cfg)
+		}
+		if err == nil {
 			err = serve(cfg, configPath)
 		}
 	case "firewall":
@@ -43,6 +46,9 @@ func main() {
 		}
 		var cfg Config
 		cfg, err = loadConfig(configPath)
+		if err == nil {
+			err = persistConfigMigration(configPath, &cfg)
+		}
 		if err == nil {
 			err = firewallSetup(cfg)
 		}
