@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,36 @@ import (
 )
 
 const backgroundReadyEnv = "IP_SELF_BACKGROUND_CHILD"
+
+const systemdServiceName = "ip-self.service"
+
+func startSystemdAPIService(configPath string) (bool, error) {
+	if filepath.Clean(configPath) != filepath.Clean(defaultConfigPath()) {
+		return false, nil
+	}
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		return false, nil
+	}
+	if _, err := os.Stat(filepath.Join("/etc/systemd/system", systemdServiceName)); err != nil {
+		return false, nil
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "systemctl", "enable", "--now", systemdServiceName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return true, fmt.Errorf("enable and start %s: %s", systemdServiceName, message)
+	}
+	return true, nil
+}
 
 func startBackgroundServer(configPath string) (int, string, error) {
 	if err := requireLinuxRoot(); err != nil {

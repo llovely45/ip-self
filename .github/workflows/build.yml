@@ -58,11 +58,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: ip-self-*
           path: dist
           merge-multiple: true
+      - name: Package systemd service
+        run: cp systemd/ip-self.service dist/ip-self.service
       - name: Create release and checksums
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,9 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          sha256sum ip-self_* > SHA256SUMS
+          sha256sum ip-self_* ip-self.service > SHA256SUMS
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release upload "$TAG_NAME" ip-self_* SHA256SUMS --clobber
+            gh release upload "$TAG_NAME" ip-self_* ip-self.service SHA256SUMS --clobber
           else
-            gh release create "$TAG_NAME" ip-self_* SHA256SUMS --generate-notes
+            gh release create "$TAG_NAME" ip-self_* ip-self.service SHA256SUMS --generate-notes
           fi

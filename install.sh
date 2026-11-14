@@ -93,6 +93,15 @@ download() {
 
 download "$base_url/$asset" "$tmpdir/$asset"
 download "$base_url/SHA256SUMS" "$tmpdir/SHA256SUMS"
+service_available=yes
+if ! download "$base_url/ip-self.service" "$tmpdir/ip-self.service" 2>/dev/null; then
+	if [ "$requested_version" = latest ]; then
+		printf '%s\n' '最新 Release 缺少 ip-self.service，已取消安装。' >&2
+		exit 1
+	fi
+	service_available=no
+	printf '%s\n' '指定的旧版 Release 不含 systemd 单元，继续按旧版手动启动模式安装。'
+fi
 
 expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$tmpdir/SHA256SUMS")
 case $expected in
@@ -116,7 +125,30 @@ if [ "$actual" != "$expected" ]; then
 	exit 1
 fi
 
+if [ "$service_available" = yes ]; then
+	expected_service=$(awk '$2 == "ip-self.service" { print $1 }' "$tmpdir/SHA256SUMS")
+	case $expected_service in
+		????????????????????????????????????????????????????????????????) ;;
+		*) printf '%s\n' '校验文件中没有找到 systemd 服务单元对应的有效 SHA-256 记录。' >&2; exit 1 ;;
+	esac
+	case $expected_service in
+		*[!0123456789abcdefABCDEF]*) printf '%s\n' 'systemd 服务单元校验值格式错误。' >&2; exit 1 ;;
+	esac
+	if command -v sha256sum >/dev/null 2>&1; then
+		actual_service=$(sha256sum "$tmpdir/ip-self.service" | awk '{ print $1 }')
+	else
+		actual_service=$(shasum -a 256 "$tmpdir/ip-self.service" | awk '{ print $1 }')
+	fi
+	if [ "$actual_service" != "$expected_service" ]; then
+		printf '%s\n' 'systemd 服务单元 SHA-256 校验失败，已取消安装。' >&2
+		exit 1
+	fi
+fi
+
 install -d -m 0755 /usr/local/bin
+if [ "$service_available" = yes ]; then
+	install -d -m 0755 /etc/systemd/system
+fi
 
 script_source=
 case $0 in
@@ -127,15 +159,39 @@ if [ -f "$script_source" ] && [ ! -L "$script_source" ] &&
 	[ "$(sed -n '2p' "$script_source")" = '# ip-self-installer' ]; then
 	install -m 0755 "$script_source" "$staged_updater"
 	mv -f "$staged_updater" /usr/local/bin/ip-self-install
+	else
+	installer_ref=main
+	if [ "$requested_version" != latest ]; then
+		installer_ref=$requested_version
+	fi
+	download "https://raw.githubusercontent.com/llovely45/ip-self/$installer_ref/install.sh" "$tmpdir/ip-self-install"
+	install -m 0755 "$tmpdir/ip-self-install" "$staged_updater"
+	mv -f "$staged_updater" /usr/local/bin/ip-self-install
 fi
 
 install -m 0755 "$tmpdir/$asset" "$staged_binary"
 mv -f "$staged_binary" /usr/local/bin/ip-self
+if [ "$service_available" = yes ]; then
+	install -m 0644 "$tmpdir/ip-self.service" /etc/systemd/system/ip-self.service
+fi
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && [ -f /etc/systemd/system/ip-self.service ]; then
+	systemctl daemon-reload
+	systemctl enable ip-self.service
+	if [ -f /etc/ip-self/config.json ]; then
+		systemctl restart ip-self.service
+		printf '%s\n' 'systemd API 服务已启动并设置为开机启动；异常退出后将自动重启。'
+	else
+		printf '%s\n' 'systemd 服务已安装并启用；初始化配置后会自动启动 API。'
+	fi
+elif [ "$service_available" = yes ]; then
+	printf '%s\n' 'systemd 服务单元已安装；当前未检测到运行中的 systemd，保留原有手动后台启动方式。'
+fi
 
 installed_version=$(/usr/local/bin/ip-self version 2>/dev/null || printf '%s' "$requested_version")
 printf '已安装 ip-self %s（%s）到 /usr/local/bin/ip-self\n' "$installed_version" "$arch"
 if [ -x /usr/local/bin/ip-self-install ]; then
 	printf '%s\n' '手动升级到最新版本：sudo ip-self-install --update'
-	printf '%s\n' '安装指定版本：sudo ip-self-install --version v0.2.5'
+	printf '%s\n' '安装指定版本：sudo ip-self-install --version v0.2.6'
 fi
 printf '%s\n' '运行 sudo ip-self 打开初始化面板。'

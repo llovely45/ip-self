@@ -29,7 +29,7 @@ func runPanel(configPath string) error {
 		fmt.Println("2) 显示 Token")
 		fmt.Println("3) 查看状态和放行 IP")
 		fmt.Println("4) 重新应用防火墙规则")
-		fmt.Println("5) 后台启动 HTTP API 服务")
+		fmt.Println("5) 启动 HTTP API 服务（systemd 可用时启用保活）")
 		fmt.Println("6) 修改 HTTP API 监听端口")
 		fmt.Println("7) 显示 API 地址和 curl 命令")
 		fmt.Println("8) 设置 curl 使用的服务器 IP/域名")
@@ -82,6 +82,16 @@ func runPanel(configPath string) error {
 			if !configured {
 				fmt.Println("请先初始化。")
 				continue
+			}
+			if managed, err := startSystemdAPIService(configPath); managed {
+				if err != nil {
+					fmt.Println("systemd 启动 API 服务失败：", err)
+					continue
+				}
+				fmt.Println("HTTP API 服务已交由 systemd 管理，并已启用开机启动和异常退出重启。")
+				fmt.Println("查看状态：sudo systemctl status ip-self.service")
+				fmt.Println("停止服务：sudo systemctl stop ip-self.service")
+				return nil
 			}
 			pid, logPath, err := startBackgroundServer(configPath)
 			if err != nil {
@@ -224,6 +234,12 @@ func initializeWithReader(configPath string, reader *bufio.Reader) error {
 	fmt.Printf("\nToken（UUIDv7，已保存且固定）：%s\n", token)
 	if err := firewallSetup(cfg); err != nil {
 		return fmt.Errorf("配置已安全保存，但防火墙规则未完成；可运行 `sudo ip-self firewall` 重试：%w", err)
+	}
+	if managed, err := startSystemdAPIService(configPath); managed {
+		if err != nil {
+			return fmt.Errorf("配置和防火墙已保存，但 systemd API 服务未能启动：%w", err)
+		}
+		fmt.Println("systemd API 服务已启动，并已启用开机启动和异常退出重启。")
 	}
 	return nil
 }

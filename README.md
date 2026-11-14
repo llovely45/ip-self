@@ -27,10 +27,10 @@ bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubuse
 安装指定版本或回退到某个 Release：
 
 ```sh
-bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh -s -- --version v0.2.5"
+bash -o pipefail -c "curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/llovely45/ip-self/main/install.sh | sudo sh -s -- --version v0.2.6"
 ```
 
-把 `v0.2.5` 换成目标 Release 标签即可。安装器会先校验 SHA-256。升级不会清除配置或白名单；首次启动新版本时，旧配置的 TCP 端口列表会自动复制到 UDP，以便原端口同时应用两种协议的规则。之后可在交互面板第 9 项分别调整 TCP 和 UDP 端口。如果 API 服务正在运行，替换二进制后还需要重启服务才能运行新版本。
+把 `v0.2.6` 换成目标 Release 标签即可。安装器会先校验 SHA-256。升级不会清除配置或白名单；首次启动新版本时，旧配置的 TCP 端口列表会自动复制到 UDP，以便原端口同时应用两种协议的规则。之后可在交互面板第 9 项分别调整 TCP 和 UDP 端口。systemd 服务会在安装升级时自动重启；手动后台模式需要停止后重新启动。
 
 旧版配置中的证书路径字段仅为兼容保留，API 始终使用 HTTP。
 
@@ -62,7 +62,40 @@ sudo ip-self
 
 选择 UFW 时，UFW 必须已经处于启用状态。`ip-self` 不会替你启用 UFW，因为这可能改变主机全局防火墙状态或中断 SSH。程序会把带有自身标记的规则放在所选端口已有规则之前。使用 iptables 或 nftables 时，UFW 必须未启用。iptables 后端管理 IPv4 和 IPv6 的 INPUT 链。nftables 后端使用自有的 `inet ipself` 表；如果发现其中存在没有 `ip-self` 所有权注释的规则，程序会拒绝替换该表。
 
-在交互面板选择 **5) 后台启动 HTTP API 服务** 后，程序会分离启动服务、报告 PID 和日志路径，然后退出面板，不会继续占用当前终端。查看日志：
+在交互面板选择 **5) 启动 HTTP API 服务** 后，如果系统安装了 ip-self 的 systemd 单元，程序会启用并启动 systemd 服务；否则会分离启动后台进程、报告 PID 和日志路径，然后退出面板。
+
+## 自动启动与保活
+
+通过 Release 安装或升级时，安装器会校验并安装 `ip-self.service`。检测到 systemd 后，它会启用开机启动；已有配置时会立即重启服务以加载新二进制。首次初始化配置后，程序也会自动启用并启动服务。服务异常退出后 systemd 会在 5 秒后重新启动它。
+
+systemd 服务只在 `/etc/ip-self/config.json` 存在时运行。状态、日志、重启和停止服务：
+
+```sh
+sudo systemctl status ip-self.service
+sudo journalctl -u ip-self.service -f
+sudo systemctl restart ip-self.service
+sudo systemctl stop ip-self.service
+```
+
+重新启用开机启动：
+
+```sh
+sudo systemctl enable --now ip-self.service
+```
+
+未使用 systemd 或使用自定义配置路径时，面板选项 5 仍通过原有的后台进程方式启动；该方式不提供 systemd 的自动重启与开机启动。
+
+源码安装时可在配置初始化后手动安装并启用服务单元：
+
+```sh
+sudo install -m 0644 systemd/ip-self.service /etc/systemd/system/ip-self.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ip-self.service
+```
+
+`ip-self.service` 使用前台 `ip-self serve`，由 systemd 接管进程和日志。程序启动时会按保存的配置重新应用防火墙规则。
+
+查看手动后台模式日志：
 
 ```sh
 sudo tail -f /etc/ip-self/ip-self.log
@@ -73,14 +106,6 @@ sudo tail -f /etc/ip-self/ip-self.log
 ```sh
 sudo kill <PID>
 ```
-
-也可以在前台运行：
-
-```sh
-sudo ip-self serve
-```
-
-`serve` 会先重新应用已保存的防火墙策略，再启动监听。前台方式适合交给 systemd 等服务管理器运行；需要后台运行时使用面板的第 5 项。
 
 选择 **6) 修改 HTTP API 监听端口** 可在初始化后调整控制端口。修改前需要先停止正在运行的 API 服务；程序会同步更新配置和它管理的防火墙规则。选择 **7) 显示 API 地址和 curl 命令** 会生成直接包含已保存 Token 的完整命令，无需再输入 Token。命令通过 curl 配置标准输入传递认证头，Token 不会进入 curl 进程参数；但复制到 shell 后可能保存在命令历史中，请勿转发或在共享终端执行。选择 **8) 设置 curl 使用的服务器 IP/域名** 可在初始化后补充或修改公网访问地址。若未设置公网地址，命令会使用 `YOUR_SERVER_IP_OR_DOMAIN` 占位符。选择 **9) 修改受保护的 TCP/UDP 端口** 可分别更新两组端口；需要先停止 API 服务，并输入 `APPLY` 确认变更。
 
